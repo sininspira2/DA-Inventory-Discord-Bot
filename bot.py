@@ -2,9 +2,9 @@ import discord
 import os
 import aiohttp
 import asyncio
+from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from fastapi import FastAPI
-import uvicorn
 
 # --- Configuration ---
 # Load environment variables from a .env file for local testing
@@ -41,9 +41,38 @@ class MyClient(discord.Client):
 
 client = MyClient(intents=intents)
 
+
 # --- Web Server Setup (FastAPI) ---
+# The bot will run as a background task managed by the FastAPI lifespan.
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Handles startup and shutdown events for the FastAPI application.
+    """
+    print("FastAPI app starting up...")
+    # Check for the bot token before starting
+    if not BOT_TOKEN:
+        raise ValueError("DISCORD_BOT_TOKEN environment variable not found.")
+
+    # Create a task to run the bot
+    # loop.create_task is used to run the bot concurrently with the web server
+    loop = asyncio.get_event_loop()
+    task = loop.create_task(client.start(BOT_TOKEN))
+    print("Discord bot background task created.")
+
+    yield
+
+    # This block runs on shutdown
+    print("FastAPI app shutting down...")
+    # Properly close the bot connection
+    await client.close()
+    # Wait for the task to finish
+    await task
+    print("Discord bot has been shut down gracefully.")
+
+
 # This web app will run alongside the bot to keep the Cloud Run instance alive.
-app = FastAPI()
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/")
 async def root():
@@ -106,32 +135,4 @@ async def call_api_command(interaction: discord.Interaction):
         print(f"An unexpected error occurred: {e}")
         await interaction.followup.send("An unexpected error occurred.")
 
-
-# --- Main Execution ---
-# This part is modified to run both the bot and the web server concurrently.
-async def main():
-    """Starts the bot and the web server."""
-    # Get the port from the environment variable, default to 8080 for local testing
-    port = int(os.environ.get("PORT", 8080))
-    
-    # Configure the Uvicorn server to run the FastAPI app
-    config = uvicorn.Config(app, host="0.0.0.0", port=port)
-    server = uvicorn.Server(config)
-
-    # Run the bot and the server concurrently
-    # client.start() is the non-blocking version of client.run()
-    await asyncio.gather(
-        client.start(BOT_TOKEN),
-        server.serve()
-    )
-
-if __name__ == "__main__":
-    if not BOT_TOKEN:
-        print("Error: DISCORD_BOT_TOKEN environment variable not found.")
-        print("Please create a .env file for local testing or set environment variables in Cloud Run.")
-    else:
-        try:
-            asyncio.run(main())
-        except KeyboardInterrupt:
-            print("Shutting down.")
-
+# --- Main Execution --- is now handled by the lifespan manager and Gunicorn/Uvicorn.
