@@ -16,7 +16,7 @@ API_ENDPOINT = "https://api.quotable.io/random" # Example API to call
 
 # A list of role IDs that are allowed to use the command.
 ALLOWED_ROLE_IDS = {
-    "123456789012345678",
+    "1405292890049216543",
     "987654321098765432"
 }
 
